@@ -1,0 +1,27 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.test
+*.out
+
+# SQLite database files
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Test & coverage artifacts
+coverage.out
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / tooling
+.vscode/
+.idea/
+*.swp

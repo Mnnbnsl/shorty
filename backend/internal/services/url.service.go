@@ -1,35 +1,53 @@
-package services 
+package services
 
 import (
-	"sync"
+	"fmt"
+	"url-shortner/internal/database"
 )
 
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-var (
-	urlStore = make(map[string]string)
-	mu       sync.RWMutex
-)
+// ShortenURL inserts the original URL, encodes the generated primary key into
+// a Base62 short code, then persists the code back onto the record.
+func ShortenURL(originalURL string) (*database.URLRecord, error) {
+	id, err := database.InsertURL(originalURL)
+	if err != nil {
+		return nil, fmt.Errorf("insert url: %w", err)
+	}
 
-func StoreURL(shortCode string, originalURL string) {
-	mu.Lock()
-	defer mu.Unlock()
+	shortCode := EncodeBase62(id)
+	if err := database.UpdateShortCode(id, shortCode); err != nil {
+		return nil, fmt.Errorf("update short code: %w", err)
+	}
 
-	urlStore[shortCode] = originalURL
+	return &database.URLRecord{
+		ID:          id,
+		OriginalURL: originalURL,
+		ShortCode:   shortCode,
+	}, nil
 }
 
+// GetURL resolves a short code to the target URL from SQLite.
 func GetURL(shortCode string) (string, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
+	originalURL, err := database.GetOriginalURL(shortCode)
+	if err != nil {
+		return "", false
+	}
 
-	url, exists := urlStore[shortCode]
-	return url, exists
+	return originalURL, true
 }
 
+// GetRecentURLs returns the most recently shortened URLs.
+func GetRecentURLs(limit int) ([]database.URLRecord, error) {
+	return database.GetRecentURLs(limit)
+}
+
+// EncodeBase62 converts a non-negative integer into a Base62 string.
 func EncodeBase62(num int64) string {
 	if num == 0 {
 		return "0"
 	}
+
 	result := ""
 	for num > 0 {
 		index := num % 62
