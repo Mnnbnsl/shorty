@@ -17,6 +17,8 @@ Built with a **pure-Go backend + SQLite** (zero CGO, zero external services) and
   platform without gcc / CGO toolchains.
 - **Instant copy + QR** — one-click clipboard and a scannable QR stub for mobile sharing.
 - **CORS-ready** — develop the frontend from any static server; the opt-in middleware just works.
+- **Token-bucket rate limiting** — per-IP rate limiter on the shorten endpoint to prevent abuse (5 req/s sustained, burst of 10).
+- **LRU redirect cache** — in-memory least-recently-used cache (10 k entries) sits in front of SQLite, so hot redirects never touch disk.
 - **Distinct, hand-tuned UI** — warm paper, ink type, one poster-red accent, perforation notches,
   a receipt-style recent list, and interaction states for loading, empty, and error.
 
@@ -24,12 +26,13 @@ Built with a **pure-Go backend + SQLite** (zero CGO, zero external services) and
 
 ## Tech stack
 
-| Layer    | Choice                                              | Why                                            |
-| -------- | --------------------------------------------------- | ---------------------------------------------- |
-| Backend  | [Go](https://go.dev) `net/http` (Go 1.22+ ServeMux) | Zero dependencies, tiny binaries               |
-| Database | [modernc.org/sqlite](https://modernc.org/sqlite)    | Pure-Go driver — no CGO, no gcc                |
-| Frontend | Vanilla HTML + CSS + JS                             | No framework, no build step, no `node_modules` |
-| Fonts    | Bricolage Grotesque + Fragment Mono                 | Characterful display paired with crisp mono    |
+| Layer        | Choice                                              | Why                                            |
+| ------------ | --------------------------------------------------- | ---------------------------------------------- |
+| Backend      | [Go](https://go.dev) `net/http` (Go 1.22+ ServeMux) | Zero dependencies, tiny binaries               |
+| Database     | [modernc.org/sqlite](https://modernc.org/sqlite)    | Pure-Go driver — no CGO, no gcc                |
+| Cache        | [hashicorp/golang-lru/v2](https://github.com/hashicorp/golang-lru) | In-memory LRU for blazing redirects  |
+| Frontend     | Vanilla HTML + CSS + JS                             | No framework, no build step, no `node_modules` |
+| Fonts        | Bricolage Grotesque + Fragment Mono                 | Characterful display paired with crisp mono    |
 
 ---
 
@@ -38,13 +41,15 @@ Built with a **pure-Go backend + SQLite** (zero CGO, zero external services) and
 ```text
 url-shortner/
 ├── backend/
-│   ├── cmd/server/main.go            # Entrypoint: DB init, routes, static serving
+│   ├── cmd/server/main.go            # Entrypoint: DB init, cache init, routes, static serving
 │   ├── data/                         # SQLite database (auto-created, git-ignored)
 │   └── internal/
 │       ├── database/db.go            # SQLite connection, schema, CRUD helpers
-│       ├── services/url.service.go   # Shortening pipeline + Base62 encoder
+│       ├── services/url.service.go   # Shortening pipeline + Base62 encoder + cache-backed lookups
 │       ├── handlers/url.handler.go   # HTTP handlers (JSON API)
-│       └── middleware/cors.go        # CORS + preflight handling
+│       ├── middleware/cors.go        # CORS + preflight handling
+│       ├── middleware/ratelimit.go   # Token-bucket rate limiter (shorten endpoint)
+│       └── cache/cache.go            # LRU redirect cache (hashicorp/golang-lru/v2)
 └── frontend/
     ├── index.html                    # Single-page markup
     └── assets/
@@ -86,6 +91,52 @@ CREATE TABLE IF NOT EXISTS urls (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+## Rate limiting
+
+The `POST /url/shorten` endpoint is protected by a **token-bucket** rate limiter
+(`backend/internal/middleware/ratelimit.go`).
+
+| Parameter | Value | Meaning                                      |
+| --------- | ----- | -------------------------------------------- |
+| Burst     | 10    | Max tokens a single IP can hold at once       |
+| Refill    | 5/s   | Tokens replenished per second per IP          |
+| Scope     | Per-IP | Tracked via `r.RemoteAddr` (IP-only, no auth) |
+
+When a request exceeds the limit the server responds with **429 Too Many Requests**:
+
+```json
+{"success":false,"error":"rate limit exceeded"}
+```
+
+A `Retry-After: 1` header is included so well-behaved clients can back off.
+The limiter is stateless across restarts (in-memory `sync.Map` of per-IP buckets) and
+applies **only** to the shorten route — redirects and static assets are not throttled.
+
+## LRU redirect cache
+
+Redirects (`GET /{code}`) are served from an in-memory **least-recently-used** cache
+powered by [`hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru)
+(`backend/internal/cache/cache.go`).
+
+| Property    | Value  | Notes                                     |
+| ----------- | ------ | ----------------------------------------- |
+| Capacity    | 10 000 | Covers the vast majority of hot short codes |
+| Key         | short code (e.g. `21`)                      |
+| Value       | original URL (e.g. `https://example.com`)  |
+| Eviction    | LRU — least-recently-used entry is dropped when full |
+
+**How it works**
+
+1. On a redirect request the service checks the cache first.
+2. **Cache hit** → the original URL is returned immediately; SQLite is never touched.
+3. **Cache miss** → the URL is read from SQLite and written into the cache for next time.
+4. On server restart the cache is cold; the first hit for each code populates it.
+
+Because redirects are far more frequent than shortens, the cache eliminates the vast
+majority of database reads and keeps redirect latency sub-millisecond.
+
+---
 
 ## API reference
 
