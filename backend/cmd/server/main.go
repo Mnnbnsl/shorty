@@ -8,13 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"url-shortner/internal/cache"
 	"url-shortner/internal/database"
 	"url-shortner/internal/handlers"
 	"url-shortner/internal/middleware"
 )
 
-// frontendDir resolves the frontend directory, preferring an explicit
-// FRONTEND_DIR override and falling back to ../frontend (run from backend/).
 func frontendDir() string {
 	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
 		return dir
@@ -63,10 +62,15 @@ func main() {
 		log.Fatalf("init database: %v", err)
 	}
 
+	// Initialise the redirect LRU cache 
+	cache.Init(10_000)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", indexHandler)
 	mux.HandleFunc("GET /assets/", assetsHandler)
-	mux.HandleFunc("POST /url/shorten", handlers.ShortenURLHandler)
+	// Rate-limit only the shorten endpoint
+	mux.Handle("POST /url/shorten",
+		middleware.RateLimitMiddleware(http.HandlerFunc(handlers.ShortenURLHandler)))
 	mux.HandleFunc("GET /api/urls/recent", handlers.RecentURLsHandler)
 	mux.HandleFunc("GET /{code}", handlers.RedirectHandler)
 

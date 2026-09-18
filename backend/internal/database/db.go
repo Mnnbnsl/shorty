@@ -20,7 +20,6 @@ type URLRecord struct {
 var DB *sql.DB
 
 // InitDB opens (creating when needed) the SQLite database file under
-// backend/data/urls.db and ensures the schema is migrated.
 func InitDB() error {
 	dir := filepath.Join("data")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -39,6 +38,21 @@ func InitDB() error {
 
 	DB = db
 
+	// Apply performance pragmas once at startup.
+	// WAL allows concurrent reads during a write.
+	// synchronous=NORMAL is safe with WAL and avoids full fsync on every commit.
+	// busy_timeout retries for up to 5 s before returning SQLITE_BUSY.
+	for _, pragma := range []string{
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA synchronous  = NORMAL`,
+		`PRAGMA busy_timeout = 5000`,
+	} {
+		if _, err := DB.Exec(pragma); err != nil {
+			return fmt.Errorf("pragma %q: %w", pragma, err)
+		}
+	}
+	DB.SetMaxOpenConns(1)
+
 	const schema = `
 CREATE TABLE IF NOT EXISTS urls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +69,6 @@ CREATE INDEX IF NOT EXISTS idx_short_code ON urls(short_code);
 	return nil
 }
 
-// InsertURL persists a new record and returns the auto-generated primary key.
 func InsertURL(originalURL string) (int64, error) {
 	res, err := DB.Exec(`INSERT INTO urls (original_url) VALUES (?)`, originalURL)
 	if err != nil {
@@ -70,13 +83,11 @@ func InsertURL(originalURL string) (int64, error) {
 	return id, nil
 }
 
-// UpdateShortCode sets the Base62 short code for the given record id.
 func UpdateShortCode(id int64, shortCode string) error {
 	_, err := DB.Exec(`UPDATE urls SET short_code = ? WHERE id = ?`, shortCode, id)
 	return err
 }
 
-// GetOriginalURL resolves a short code back to the original URL.
 func GetOriginalURL(shortCode string) (string, error) {
 	var originalURL string
 
@@ -88,7 +99,7 @@ func GetOriginalURL(shortCode string) (string, error) {
 	return originalURL, err
 }
 
-// GetRecentURLs fetches the most recently shortened URLs, newest first.
+
 func GetRecentURLs(limit int) ([]URLRecord, error) {
 	if limit <= 0 {
 		limit = 10

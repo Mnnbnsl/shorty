@@ -12,6 +12,8 @@ backend/data/
 
 # Test & coverage artifacts
 coverage.out
+testbench/
+writefile/
 
 # Logs
 *.log

@@ -62,8 +62,6 @@ func buildShortURL(r *http.Request, shortCode string) string {
 	return scheme + "://" + r.Host + "/" + shortCode
 }
 
-// normalizeURL trims whitespace, auto-prefixes https:// when the protocol is
-// missing, and verifies the result is a valid absolute HTTP(S) URI.
 func normalizeURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

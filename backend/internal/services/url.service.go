@@ -2,13 +2,12 @@ package services
 
 import (
 	"fmt"
+	"url-shortner/internal/cache"
 	"url-shortner/internal/database"
 )
 
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-// ShortenURL inserts the original URL, encodes the generated primary key into
-// a Base62 short code, then persists the code back onto the record.
 func ShortenURL(originalURL string) (*database.URLRecord, error) {
 	id, err := database.InsertURL(originalURL)
 	if err != nil {
@@ -27,22 +26,24 @@ func ShortenURL(originalURL string) (*database.URLRecord, error) {
 	}, nil
 }
 
-// GetURL resolves a short code to the target URL from SQLite.
 func GetURL(shortCode string) (string, bool) {
+	if url, ok := cache.Get(shortCode); ok {
+		return url, true
+	}
+
 	originalURL, err := database.GetOriginalURL(shortCode)
 	if err != nil {
 		return "", false
 	}
 
+	cache.Set(shortCode, originalURL)
 	return originalURL, true
 }
 
-// GetRecentURLs returns the most recently shortened URLs.
 func GetRecentURLs(limit int) ([]database.URLRecord, error) {
 	return database.GetRecentURLs(limit)
 }
 
-// EncodeBase62 converts a non-negative integer into a Base62 string.
 func EncodeBase62(num int64) string {
 	if num == 0 {
 		return "0"
