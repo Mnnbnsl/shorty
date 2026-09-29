@@ -1,4 +1,4 @@
-# Shorty v2 — long links, chopped short
+# Shorty — long links, chopped short
 
 A high-throughput, feature-rich URL shortener. Paste a long address, hit **Chop it**, and get a compact code you can say out loud. 
 
