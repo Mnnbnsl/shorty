@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shorty — long links, chopped short</title>
-    <meta name="description" content="Paste any long address, hit chop, get a short code you can actually say out loud. Backed by Go + SQLite, stored forever.">
+    <meta name="description" content="Paste any long address, hit chop, get a short link you can say out loud.">
     <meta name="theme-color" content="#f4eee1">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c9431f'/%3E%3Cg fill='none' stroke='%23f6f1e7' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='8' cy='9' r='3.2'/%3E%3Ccircle cx='8' cy='23' r='3.2'/%3E%3Cpath d='M13 6.5 24 16M13 25.5 24 16'/%3E%3C/g%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,25 +17,39 @@
 
     <div class="page">
         <header class="masthead">
-            <a class="brand" href="/" aria-label="Shorty home">
-                <span class="brand-mark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                        <circle cx="5.5" cy="6" r="2.6"/>
-                        <circle cx="5.5" cy="18" r="2.6"/>
-                        <path d="M9.5 4.5 20 12"/>
-                        <path d="M9.5 19.5 20 12"/>
-                    </svg>
-                </span>
-                <span class="brand-name">Shorty</span>
-            </a>
-            <p class="masthead-note mono">long in, short out</p>
+            <div class="masthead-left">
+                <a class="brand" href="/" aria-label="Shorty home">
+                    <span class="brand-mark" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                            <circle cx="5.5" cy="6" r="2.6"/>
+                            <circle cx="5.5" cy="18" r="2.6"/>
+                            <path d="M9.5 4.5 20 12"/>
+                            <path d="M9.5 19.5 20 12"/>
+                        </svg>
+                    </span>
+                    <span class="brand-name">Shorty</span>
+                </a>
+                <p class="masthead-note mono">long in, short out</p>
+            </div>
+
+            <!-- Auth Status Area -->
+            <div id="auth-bar" class="auth-bar">
+                <div id="auth-guest" class="auth-group">
+                    <button id="login-open-btn" type="button" class="mini-btn">log in</button>
+                    <button id="register-open-btn" type="button" class="mini-btn mini-btn-accent">sign up</button>
+                </div>
+                <div id="auth-user" class="auth-group" hidden>
+                    <span id="user-display-name" class="user-pill mono"></span>
+                    <button id="logout-btn" type="button" class="mini-btn">log out</button>
+                </div>
+            </div>
         </header>
 
         <main>
             <section class="hero">
                 <p class="kicker mono" aria-hidden="true">— the link chopper —</p>
                 <h1 class="hero-title">Long URLs,<br><span class="strike">chopped short.</span></h1>
-                <p class="hero-sub">Paste any address, hit <em>chop</em>, and get a code you can say out loud. Come back anytime — it'll still be there.</p>
+                <p class="hero-sub">Paste any address, hit <em>chop</em>, and get a code you can say out loud.</p>
             </section>
 
             <section class="ticket" aria-label="Shorten a URL">
@@ -54,6 +68,32 @@
                         >
                         <button id="clear-btn" type="button" class="clear-btn" aria-label="Clear input" hidden>clear</button>
                     </div>
+
+                    <!-- Custom alias expandable toggle -->
+                    <div class="alias-toggle-row">
+                        <button id="alias-toggle-btn" type="button" class="text-toggle-btn mono" aria-expanded="false">
+                            + custom alias
+                        </button>
+                        <span id="anon-notice" class="anon-notice mono">
+                            ⚡ Anon links expire in 2h
+                        </span>
+                    </div>
+
+                    <div id="alias-wrap" class="alias-wrap" hidden>
+                        <div class="alias-input-box">
+                            <span class="alias-prefix mono">shorty/</span>
+                            <input
+                                id="alias-input"
+                                type="text"
+                                name="customCode"
+                                placeholder="my-custom-code"
+                                maxlength="30"
+                                spellcheck="false"
+                            >
+                        </div>
+                        <p class="alias-hint mono">Letters, numbers, dashes, underscores (3-30 chars). Requires login.</p>
+                    </div>
+
                     <button id="shorten-btn" type="submit" class="chop-btn">
                         <svg class="chop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
                             <circle cx="6" cy="6" r="2.6"/>
@@ -69,12 +109,19 @@
                 <span class="notch notch-r" aria-hidden="true"></span>
             </section>
 
+            <!-- Result Coupon -->
             <section id="result-card" class="stub" hidden aria-live="polite">
                 <div class="stub-head">
                     <span class="stub-label mono">your coupon</span>
+                    <span id="result-badge" class="badge-status mono"></span>
                     <button id="qr-toggle" type="button" class="mini-btn" aria-expanded="false">show QR</button>
                 </div>
+
                 <code id="result-url" class="result-url mono"></code>
+
+                <!-- Expiration countdown / notice -->
+                <div id="result-expiry-banner" class="expiry-banner mono" hidden></div>
+
                 <div class="stub-actions">
                     <button id="copy-btn" type="button" class="stamp-btn" aria-live="polite">
                         <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -85,7 +132,12 @@
                         visit it
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>
                     </a>
+                    <button id="analytics-btn" type="button" class="stamp-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                        stats
+                    </button>
                 </div>
+
                 <div id="qr-panel" class="qr-panel" hidden>
                     <img id="qr-image" alt="QR code for the generated short link">
                 </div>
@@ -93,18 +145,22 @@
                 <span class="notch notch-r" aria-hidden="true"></span>
             </section>
 
-            <section id="recent-section" class="recents" hidden>
-                <div class="recents-head">
-                    <h2 class="recents-title">Recent shorts</h2>
-                    <button id="refresh-btn" type="button" class="mini-btn" title="Refresh list">refresh</button>
+            <!-- Links Dashboard (Recent Shorts & My Links) -->
+            <section id="dashboard-section" class="recents">
+                <div class="dashboard-tabs">
+                    <button id="tab-recent" type="button" class="tab-btn active mono">Recent shorts</button>
+                    <button id="tab-mylinks" type="button" class="tab-btn mono" hidden>My Saved Links (<span id="my-links-count">0</span>)</button>
+                    <button id="refresh-btn" type="button" class="mini-btn refresh-btn" title="Refresh list">refresh</button>
                 </div>
+
                 <div id="skeleton" class="skeleton" aria-hidden="true">
                     <span class="sk sk-row"></span>
                     <span class="sk sk-row"></span>
                     <span class="sk sk-row"></span>
                 </div>
-                <ul id="recent-list" class="recent-list"></ul>
-                <p id="recent-empty" class="recent-empty" hidden>No shorts yet — paste a link above.</p>
+
+                <ul id="link-list" class="recent-list"></ul>
+                <p id="list-empty" class="recent-empty" hidden>No shorts yet — paste a link above.</p>
             </section>
         </main>
 
@@ -112,6 +168,95 @@
             <p>&copy; <span id="year"></span> Shorty</p>
             <p class="mono">enter to chop · esc to clear</p>
         </footer>
+    </div>
+
+    <!-- Auth Modal (Login / Sign Up) -->
+    <div id="auth-modal" class="modal-backdrop" hidden>
+        <div class="modal-card ticket" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+            <div class="modal-header">
+                <div class="auth-tabs">
+                    <button id="auth-tab-login" type="button" class="auth-tab active mono">Log in</button>
+                    <button id="auth-tab-register" type="button" class="auth-tab mono">Sign up</button>
+                </div>
+                <button id="auth-close-btn" type="button" class="modal-close" aria-label="Close modal">&times;</button>
+            </div>
+
+            <form id="auth-form" class="auth-form" novalidate>
+                <div id="auth-name-group" class="form-group" hidden>
+                    <label for="auth-name" class="mono form-label">Display Name</label>
+                    <input id="auth-name" type="text" class="form-input" placeholder="e.g. Alex" autocomplete="name">
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-email" class="mono form-label">Email Address</label>
+                    <input id="auth-email" type="email" class="form-input" placeholder="you@example.com" autocomplete="email" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-password" class="mono form-label">Password</label>
+                    <input id="auth-password" type="password" class="form-input" placeholder="At least 6 characters" autocomplete="current-password" required>
+                </div>
+
+                <button id="auth-submit-btn" type="submit" class="chop-btn auth-submit-btn">
+                    <span id="auth-submit-label">Log in</span>
+                </button>
+                <p id="auth-error-msg" class="error-msg" role="alert" hidden></p>
+            </form>
+            <span class="notch notch-l" aria-hidden="true"></span>
+            <span class="notch notch-r" aria-hidden="true"></span>
+        </div>
+    </div>
+
+    <!-- Analytics Modal -->
+    <div id="analytics-modal" class="modal-backdrop" hidden>
+        <div class="modal-card ticket analytics-card" role="dialog" aria-modal="true" aria-labelledby="stats-modal-title">
+            <div class="modal-header">
+                <div>
+                    <span class="stub-label mono">link insights</span>
+                    <h3 id="stats-code" class="stats-code mono"></h3>
+                </div>
+                <button id="stats-close-btn" type="button" class="modal-close" aria-label="Close modal">&times;</button>
+            </div>
+
+            <div id="stats-content" class="stats-content">
+                <div class="stats-kpi-grid">
+                    <div class="kpi-box">
+                        <span class="kpi-value mono" id="kpi-clicks">0</span>
+                        <span class="kpi-label mono">total clicks</span>
+                    </div>
+                    <div class="kpi-box">
+                        <span class="kpi-value mono" id="kpi-visitors">0</span>
+                        <span class="kpi-label mono">unique visitors</span>
+                    </div>
+                    <div class="kpi-box">
+                        <span class="kpi-value mono" id="kpi-type">Persistent</span>
+                        <span class="kpi-label mono">link type</span>
+                    </div>
+                </div>
+
+                <!-- Daily Chart Breakdown -->
+                <div class="stats-section">
+                    <h4 class="stats-subtitle mono">Clicks in past 14 days</h4>
+                    <div id="chart-bars" class="chart-bars"></div>
+                </div>
+
+                <div class="stats-two-col">
+                    <!-- Top Referrers -->
+                    <div class="stats-subcol">
+                        <h4 class="stats-subtitle mono">Top Referrers</h4>
+                        <ul id="referers-list" class="stats-breakdown-list mono"></ul>
+                    </div>
+
+                    <!-- Devices -->
+                    <div class="stats-subcol">
+                        <h4 class="stats-subtitle mono">Devices</h4>
+                        <ul id="devices-list" class="stats-breakdown-list mono"></ul>
+                    </div>
+                </div>
+            </div>
+            <span class="notch notch-l" aria-hidden="true"></span>
+            <span class="notch notch-r" aria-hidden="true"></span>
+        </div>
     </div>
 
     <div id="toast" class="toast mono" role="status" aria-live="polite" hidden></div>

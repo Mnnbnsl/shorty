@@ -9,6 +9,7 @@ backend/data/
 *.db
 *.sqlite
 *.sqlite3
+backend/migrations/
 
 # Test & coverage artifacts
 coverage.out
@@ -27,3 +28,7 @@ Desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Environment variables
+.env
+.env.local

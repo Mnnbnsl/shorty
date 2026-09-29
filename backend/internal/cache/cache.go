@@ -1,27 +1,28 @@
 package cache
 
 import (
-	lru "github.com/hashicorp/golang-lru/v2"
+	"context"
+	"time"
 )
 
-// Redirects is the shared cache instance, initialised by Init.
-var Redirects *lru.Cache[string, string]
+// Get retrieves a URL from the Redis cache.
+func Get(shortCode string) (string, bool) {
+	if Client == nil {
+		return "", false
+	}
+	return Client.Get(context.Background(), shortCode)
+}
 
-// Init creates the LRU cache with the given capacity.
-// Call once at startup before serving requests.
-// A capacity of 10_000 covers the vast majority of hot short codes
-func Init(capacity int) {
-	var err error
-	Redirects, err = lru.New[string, string](capacity)
-	if err != nil {
-		panic("cache: invalid capacity: " + err.Error())
+// Set stores a URL in the Redis cache with an optional TTL.
+func Set(shortCode, url string, ttl time.Duration) {
+	if Client != nil {
+		_ = Client.Set(context.Background(), shortCode, url, ttl)
 	}
 }
 
-func Get(shortCode string) (string, bool) {
-	return Redirects.Get(shortCode)
-}
-
-func Set(shortCode, url string) {
-	Redirects.Add(shortCode, url)
+// Delete removes a URL from the Redis cache.
+func Delete(shortCode string) {
+	if Client != nil {
+		_ = Client.Delete(context.Background(), shortCode)
+	}
 }

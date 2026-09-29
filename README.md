@@ -1,228 +1,214 @@
-# Shorty — long links, chopped short
+# Shorty v2 — long links, chopped short
 
-A minimal, self-contained URL shortener. Paste a long address, hit **Chop it**, and get a compact
-code you can say out loud. Every link outlives a server restart — persistence is built in.
+A high-throughput, feature-rich URL shortener. Paste a long address, hit **Chop it**, and get a compact code you can say out loud. 
 
-Built with a **pure-Go backend + SQLite** (zero CGO, zero external services) and a hand-rolled
-**paper-ticket frontend** with no framework.
+Built with a **pure-Go backend, PostgreSQL 16 (high concurrent write throughput), and Redis 7 (caching + auto-expiring ephemeral links)**, paired with a hand-rolled **paper-ticket frontend**.
 
 ---
 
-## Highlights
+## Highlights & What's New in v2
 
-- **Base62 micro-codes** — each short code is the primary key of your link, encoded into an
-  ultra-short alphanumeric string (`id 125` → code `21`).
-- **SQLite persistence** — shortened URLs survive restarts. No in-memory flimsiness.
-- **No build friction** — `modernc.org/sqlite` is 100% pure Go, so the project compiles on any
-  platform without gcc / CGO toolchains.
-- **Instant copy + QR** — one-click clipboard and a scannable QR stub for mobile sharing.
-- **CORS-ready** — develop the frontend from any static server; the opt-in middleware just works.
-- **Token-bucket rate limiting** — per-IP rate limiter on the shorten endpoint to prevent abuse (5 req/s sustained, burst of 10).
-- **LRU redirect cache** — in-memory least-recently-used cache (10 k entries) sits in front of SQLite, so hot redirects never touch disk.
-- **Distinct, hand-tuned UI** — warm paper, ink type, one poster-red accent, perforation notches,
-  a receipt-style recent list, and interaction states for loading, empty, and error.
+- **PostgreSQL 16 Storage** — Replaced SQLite to unlock true concurrent write throughput (MVCC + connection pooling via `pgxpool`).
+- **Redis 7 Distributed Cache** — Replaced the in-memory LRU cache with Redis for sub-millisecond redirects and distributed caching.
+- **2-Hour Ephemeral Anonymous Links** — Links created without an account automatically vanish after **2 hours** via Redis TTL expiration and PostgreSQL background cleanup.
+- **User Authentication (JWT + Bcrypt)** — Sign up and log in to save links permanently to your account and manage your personal links dashboard.
+- **Custom Aliases** — Logged-in users can pick custom short codes (e.g., `shorty/my-brand`). Validated against syntax rules and reserved system keywords.
+- **Asynchronous Click Analytics Engine** — Redirects enqueue click events onto a non-blocking channel (10k buffer); worker goroutines batch-insert using PostgreSQL `COPY` for zero impact on redirect latency.
+- **Rich Analytics Dashboard** — View total clicks, unique visitors, 14-day daily click charts, top referral domains, and device breakdown (desktop, mobile, tablet, bot).
+- **Docker Compose** — One-command startup for PostgreSQL and Redis.
 
 ---
 
-## Tech stack
+## Tech Stack
 
-| Layer        | Choice                                              | Why                                            |
-| ------------ | --------------------------------------------------- | ---------------------------------------------- |
-| Backend      | [Go](https://go.dev) `net/http` (Go 1.22+ ServeMux) | Zero dependencies, tiny binaries               |
-| Database     | [modernc.org/sqlite](https://modernc.org/sqlite)    | Pure-Go driver — no CGO, no gcc                |
-| Cache        | [hashicorp/golang-lru/v2](https://github.com/hashicorp/golang-lru) | In-memory LRU for blazing redirects  |
-| Frontend     | Vanilla HTML + CSS + JS                             | No framework, no build step, no `node_modules` |
-| Fonts        | Bricolage Grotesque + Fragment Mono                 | Characterful display paired with crisp mono    |
+| Layer | Choice | Why |
+|---|---|---|
+| **Backend** | [Go 1.25+](https://go.dev) (`net/http` Go 1.22+ ServeMux) | Zero bloated frameworks, high concurrency, tiny binaries |
+| **Database** | [PostgreSQL 16](https://www.postgresql.org) via [`pgx/v5`](https://github.com/jackc/pgx) | Robust MVCC concurrent writes, connection pool, batch `COPY` |
+| **Cache & TTL** | [Redis 7](https://redis.io) via [`go-redis/v9`](https://github.com/redis/go-redis) | Sub-millisecond redirects, automatic 2h ephemeral key TTL |
+| **Auth** | [JWT (golang-jwt/jwt/v5)](https://github.com/golang-jwt/jwt) + [Bcrypt](https://pkg.go.dev/golang.org/x/crypto/bcrypt) | Stateless access tokens + rotating refresh tokens in httpOnly cookies |
+| **Frontend** | Vanilla HTML + CSS + JS | Hand-tuned paper ticket design system, no node_modules |
+| **Fonts** | Bricolage Grotesque + Fragment Mono | Distinct editorial typography |
 
 ---
 
-## Project structure
+## Project Structure
 
 ```text
 url-shortner/
+├── docker-compose.yml                  # PostgreSQL 16 & Redis 7 services
 ├── backend/
-│   ├── cmd/server/main.go            # Entrypoint: DB init, cache init, routes, static serving
-│   ├── data/                         # SQLite database (auto-created, git-ignored)
+│   ├── cmd/server/main.go              # Server entrypoint & route registration
+│   ├── migrations/                     # SQL migration files
+│   │   └── 001_initial_schema.sql      # Tables: users, urls, clicks, refresh_tokens
 │   └── internal/
-│       ├── database/db.go            # SQLite connection, schema, CRUD helpers
-│       ├── services/url.service.go   # Shortening pipeline + Base62 encoder + cache-backed lookups
-│       ├── handlers/url.handler.go   # HTTP handlers (JSON API)
-│       ├── middleware/cors.go        # CORS + preflight handling
-│       ├── middleware/ratelimit.go   # Token-bucket rate limiter (shorten endpoint)
-│       └── cache/cache.go            # LRU redirect cache (hashicorp/golang-lru/v2)
+│       ├── config/config.go            # Env configuration (DATABASE_URL, REDIS_URL, etc.)
+│       ├── auth/                       # JWT tokens, bcrypt password hashing, middleware
+│       │   ├── jwt.go
+│       │   ├── password.go
+│       │   └── middleware.go
+│       ├── validation/alias.go         # Custom alias validation & reserved word blocklist
+│       ├── database/                   # PostgreSQL connection pool & repositories
+│       │   ├── postgres.go             # pgxpool connection & schema auto-migration
+│       │   ├── models.go               # Go structs for DB records & analytics stats
+│       │   ├── url.repo.go             # URL CRUD & Base62 sequence retrieval
+│       │   ├── user.repo.go            # User account queries
+│       │   ├── click.repo.go           # Batch COPY clicks & aggregate statistics
+│       │   └── token.repo.go           # Refresh token storage
+│       ├── cache/                      # Redis client & cache delegations
+│       │   ├── redis.go
+│       │   └── cache.go
+│       ├── services/                   # Core business logic
+│       │   ├── url.service.go          # Shortening, custom alias, resolving, cleanup worker
+│       │   ├── user.service.go         # Registration, login, token rotation
+│       │   └── analytics.service.go    # Click buffer channel & batch worker
+│       ├── handlers/                   # HTTP JSON handlers
+│       │   ├── url.handler.go          # Shorten, redirect, recent & user links
+│       │   ├── auth.handler.go         # Register, login, refresh, logout, me
+│       │   └── analytics.handler.go    # Stats & raw click logs
+│       └── middleware/
+│           ├── cors.go                 # CORS with Authorization support
+│           └── ratelimit.go            # Token-bucket per-IP rate limiter
 └── frontend/
-    ├── index.html                    # Single-page markup
+    ├── index.html                      # Single-page markup with auth & analytics modals
     └── assets/
-        ├── css/style.css             # Paper-cutter design system
-        └── js/app.js                 # Fetch, copy, QR, keyboard, recents
+        ├── css/style.css               # Paper-ticket design system & analytics charts
+        └── js/app.js                   # Client logic (auth, shorten, dashboard, analytics)
 ```
-
-## How shortening works
-
-1. The handler validates and normalizes the URL (auto-prefixing `https://` when a protocol is
-   missing).
-2. The service inserts the original URL into SQLite and receives the auto-increment `id`.
-3. That `id` is Base62-encoded into the short code.
-4. The code is persisted back onto the row, and the full short URL is returned.
-
-```text
-POST /url/shorten  {"url":"example.com"}
-        │  normalizes to  https://example.com
-        ▼
-INSERT urls (original_url)                 id = 125
-        │
-        ▼
-EncodeBase62(125)                    →     "21"
-        │
-        ▼
-UPDATE urls SET short_code = '21'
-        │
-        ▼
-201 {"success":true,"shortCode":"21","shortUrl":"http://localhost:8080/21", ...}
-```
-
-Database schema (`backend/data/urls.db`):
-
-```sql
-CREATE TABLE IF NOT EXISTS urls (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    original_url TEXT NOT NULL,
-    short_code TEXT UNIQUE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-## Rate limiting
-
-The `POST /url/shorten` endpoint is protected by a **token-bucket** rate limiter
-(`backend/internal/middleware/ratelimit.go`).
-
-| Parameter | Value | Meaning                                      |
-| --------- | ----- | -------------------------------------------- |
-| Burst     | 10    | Max tokens a single IP can hold at once       |
-| Refill    | 5/s   | Tokens replenished per second per IP          |
-| Scope     | Per-IP | Tracked via `r.RemoteAddr` (IP-only, no auth) |
-
-When a request exceeds the limit the server responds with **429 Too Many Requests**:
-
-```json
-{"success":false,"error":"rate limit exceeded"}
-```
-
-A `Retry-After: 1` header is included so well-behaved clients can back off.
-The limiter is stateless across restarts (in-memory `sync.Map` of per-IP buckets) and
-applies **only** to the shorten route — redirects and static assets are not throttled.
-
-## LRU redirect cache
-
-Redirects (`GET /{code}`) are served from an in-memory **least-recently-used** cache
-powered by [`hashicorp/golang-lru/v2`](https://github.com/hashicorp/golang-lru)
-(`backend/internal/cache/cache.go`).
-
-| Property    | Value  | Notes                                     |
-| ----------- | ------ | ----------------------------------------- |
-| Capacity    | 10 000 | Covers the vast majority of hot short codes |
-| Key         | short code (e.g. `21`)                      |
-| Value       | original URL (e.g. `https://example.com`)  |
-| Eviction    | LRU — least-recently-used entry is dropped when full |
-
-**How it works**
-
-1. On a redirect request the service checks the cache first.
-2. **Cache hit** → the original URL is returned immediately; SQLite is never touched.
-3. **Cache miss** → the URL is read from SQLite and written into the cache for next time.
-4. On server restart the cache is cold; the first hit for each code populates it.
-
-Because redirects are far more frequent than shortens, the cache eliminates the vast
-majority of database reads and keeps redirect latency sub-millisecond.
 
 ---
 
-## API reference
+## Database Schema (PostgreSQL)
 
-| Method | Route              | Description                              |
-| ------ | ------------------ | ---------------------------------------- |
-| `POST` | `/url/shorten`     | Create a short link                      |
-| `GET`  | `/api/urls/recent` | Last 10 shortened links (newest first)   |
-| `GET`  | `/{code}`          | 302 redirect to the original URL         |
-| `GET`  | `/`                | Serves the frontend (`index.html`)       |
-| `GET`  | `/assets/*`        | Serves static CSS / JS / images          |
+```sql
+-- Users
+CREATE TABLE users (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email         CITEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name  TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-### Shorten a URL
+-- URLs
+CREATE TABLE urls (
+    id            BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    original_url  TEXT NOT NULL,
+    short_code    VARCHAR(64) NOT NULL UNIQUE,
+    is_custom     BOOLEAN NOT NULL DEFAULT false,
+    user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+    is_ephemeral  BOOLEAN NOT NULL DEFAULT false,
+    expires_at    TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Clicks (Analytics)
+CREATE TABLE clicks (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    url_id      BIGINT NOT NULL REFERENCES urls(id) ON DELETE CASCADE,
+    clicked_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ip_hash     VARCHAR(64),
+    user_agent  TEXT,
+    referer     TEXT,
+    device_type VARCHAR(32)
+);
+
+-- Refresh Tokens
+CREATE TABLE refresh_tokens (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+---
+
+## How Ephemeral Links & Custom Aliases Work
+
+1. **Anonymous Shortening**:
+   - `is_ephemeral = true`, `expires_at = now() + 2 hours`.
+   - Redis key `url:{code}` is set with an explicit `EX 7200` (2 hours).
+   - After 2 hours, the Redis key expires and DB queries reject the expired link.
+   - A background worker (`services.StartCleanupWorker`) purges expired rows every 15 minutes.
+2. **Authenticated Shortening**:
+   - `is_ephemeral = false`, `expires_at = NULL`, `user_id = <UUID>`.
+   - Cached in Redis for 24 hours.
+   - Saved permanently in the user's dashboard.
+3. **Custom Aliases**:
+   - Requires login (anonymous requests are rejected with HTTP 400).
+   - Must be 3–30 characters (`a-z`, `A-Z`, `0-9`, `-`, `_`).
+   - Reserved words (`api`, `auth`, `admin`, `dashboard`, `stats`, etc.) are blocked.
+
+---
+
+## API Reference
+
+### URL Shortener & Redirect
+
+| Method | Route | Auth | Description |
+|---|---|---|---|
+| `POST` | `/url/shorten` | Optional | Create short URL. Accepts optional `customCode` if logged in. |
+| `GET` | `/{code}` | Public | 302 redirect. Enqueues async click event. |
+| `GET` | `/api/urls/recent` | Public | Returns recent public active links. |
+
+### Authentication
+
+| Method | Route | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register with `email`, `password`, `displayName`. Returns JWT. |
+| `POST` | `/api/auth/login` | Log in with `email`, `password`. Sets httpOnly refresh cookie. |
+| `POST` | `/api/auth/refresh` | Rotates access token using refresh cookie. |
+| `POST` | `/api/auth/logout` | Revokes refresh token and clears cookie. |
+| `GET` | `/api/user/me` | Returns current user profile. (Bearer token required) |
+
+### User Dashboard
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/user/urls` | Returns all links created by the user with total click counts. |
+| `DELETE` | `/api/user/urls/{code}` | Deletes a user's short link and purges from Redis. |
+
+### Analytics
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/urls/{code}/stats` | Aggregate stats: total clicks, unique visitors, daily breakdown, referrers, devices. |
+| `GET` | `/api/urls/{code}/clicks` | Paginated raw click log. |
+
+---
+
+## Getting Started
+
+### 1. Start PostgreSQL and Redis via Docker Compose
 
 ```bash
-curl -X POST http://localhost:8080/url/shorten \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com"}'
+docker compose up -d
 ```
 
-```json
-{
-  "success": true,
-  "shortCode": "1",
-  "shortUrl": "http://localhost:8080/1",
-  "originalUrl": "https://example.com"
-}
+Verify containers are running:
+```bash
+docker ps
+# shorty-postgres (healthy on 5432)
+# shorty-redis (healthy on 6379)
 ```
 
-### Fetch recent links
+### 2. Run the Go Server
 
 ```bash
-curl http://localhost:8080/api/urls/recent
-```
-
-```json
-{
-  "success": true,
-  "data": [
-    { "id": 2, "originalUrl": "https://example.com", "shortCode": "2",
-      "shortUrl": "http://localhost:8080/2", "createdAt": "2026-09-16T20:20:29Z" }
-  ]
-}
-```
-
-> Error responses use the same shape: `{ "success": false, "error": "message" }` with an HTTP 4xx/5xx.
-
-## Getting started
-
-Requirements: **Go 1.22+** (project targets 1.25).
-
-```bash
-# from the repository root
 cd backend
 go run cmd/server/main.go
 ```
 
-Then open [http://localhost:8080](http://localhost:8080).
+The server automatically runs initial database migrations on startup and listens at **http://localhost:8080**.
 
-- The database `backend/data/urls.db` is created automatically on first start.
-- Set `FRONTEND_DIR` to point at a different frontend folder if you move the repo layout:
+### 3. Open the App
 
-  ```bash
-  FRONTEND_DIR=/path/to/frontend go run cmd/server/main.go
-  ```
-
-### Try it out
-
-1. Paste `google.com` and hit **Chop it** — you'll get `http://localhost:8080/1`.
-2. Open that link — it 302s straight to Google.
-3. Copy the link, expand its QR stub, and check **Recent shorts**.
-4. Restart the server — the link still resolves.
-
-## Frontend notes
-
-- **Recent shorts** lists the latest 2 links for a tidy demo; the backend already returns up to 10
-  in `/api/urls/recent`.
-- Keyboard: **Enter** to chop, **Esc** to clear the form.
-- All user-supplied text (URLs, codes) is rendered with DOM `textContent`, so the UI is
-  XSS-safe even when shortening untrusted links.
-- `prefers-reduced-motion` is honored — all animation is gated off when the user asks.
-
-## Roadmap ideas
-
-- Click counts / analytics per code
-- Custom aliases (user-picked short codes)
-- URL expiry and bulk import
-- Embeddable share cards
-
----
+Visit [http://localhost:8080](http://localhost:8080) in your browser:
+- Try shortening without logging in — link will show **2h Ephemeral** status.
+- Click **Sign up** in the header to create an account.
+- Expand **+ custom alias** to create a custom link (e.g. `shorty/my-link`).
+- Click **stats** or the click count badge to inspect click analytics!
